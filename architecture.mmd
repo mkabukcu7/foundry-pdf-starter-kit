@@ -1,0 +1,30 @@
+flowchart LR
+    subgraph Local["Local machine - single user, one Uvicorn worker"]
+        Browser["Minimal browser UI"]
+        API["FastAPI - loopback and same-origin only"]
+        PDF["pypdf - text per page"]
+        Chunker["1200-character chunks / 150-character overlap within pages"]
+        Ledger[".runtime/state.json - active document UUID and known chunk keys"]
+        Validator["Validate chunk IDs and verbatim quotes; render document/page citations"]
+        Identity["DefaultAzureCredential - Entra identity"]
+    end
+    subgraph Azure["Azure-hosted services - manually configured"]
+        Embeddings["Foundry model deployment - text-embedding-3-small / 1536 dimensions"]
+        Search["Azure AI Search - dedicated hybrid/vector index"]
+        Agent["One Foundry prompt agent - select evidence or abstain; no tools"]
+    end
+    Browser -->|"Upload PDF / ask question + current UUID"| API
+    API -->|"Upload"| PDF --> Chunker
+    API -->|"Invalidate old document; record keys before writes"| Ledger
+    Chunker -->|"Embed batches"| Embeddings
+    Embeddings -->|"Vectors via backend"| API
+    API -->|"Delete tracked old records; upload chunks + page metadata"| Search
+    API -->|"Embed question"| Embeddings
+    API -->|"Hybrid retrieval, document_id prefilter, top 5"| Search
+    Search -->|"Current PDF passages only"| API
+    API -->|"Question + untrusted passages; no history"| Agent
+    Agent -->|"Structured evidence selection"| Validator
+    Validator -->|"Extractive answer + citations, or unsupported"| Browser
+    Identity -.-> Embeddings
+    Identity -.-> Search
+    Identity -.-> Agent

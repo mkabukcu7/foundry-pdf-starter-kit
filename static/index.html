@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Propel PDF Knowledge Librarian</title>
+<style>
+body {font: 17px system-ui; max-width: 800px; margin: 3rem auto; padding: 1rem;}
+input, button, textarea {font: inherit; margin: .5rem 0; padding: .5rem;}
+textarea {width: 95%; height: 5rem;} pre {white-space: pre-wrap;}
+button:disabled {opacity: .5;} #status {color: #333;}
+</style>
+<h1>PDF Knowledge Librarian</h1>
+<p>Upload one text-based PDF, then ask about it. Answers are verbatim evidence with
+document and page citations. Scanned PDFs requiring OCR are out of scope.</p>
+<p>This is a single-user local demo. Uploading replaces the current document for every tab.</p>
+<form id="upload">
+  <label for="pdf">PDF (5 MiB, 50 pages maximum)</label><br>
+  <input id="pdf" type="file" accept=".pdf,application/pdf" required>
+  <button>Upload / replace</button>
+</form>
+<p id="status" role="status"></p>
+<form id="ask">
+  <label for="question">Question about the current PDF</label>
+  <textarea id="question" maxlength="2000" required></textarea>
+  <button id="ask-button" disabled>Ask</button>
+</form>
+<pre id="answer" aria-live="polite"></pre>
+<script>
+let current = null;
+let busy = false;
+const status = document.querySelector('#status');
+const answer = document.querySelector('#answer');
+const askButton = document.querySelector('#ask-button');
+const uploadButton = document.querySelector('#upload button');
+function setBusy(value) {
+  busy = value;
+  uploadButton.disabled = busy;
+  askButton.disabled = busy || !current;
+}
+async function api(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
+  return data;
+}
+async function refresh() {
+  current = (await api('/api/document')).document;
+  status.textContent = current ? `Current: ${current.document_name} (${current.chunks} chunks)` : 'Upload a PDF to begin.';
+  askButton.disabled = busy || !current;
+}
+document.querySelector('#upload').onsubmit = async event => {
+  event.preventDefault();
+  if (busy) return;
+  setBusy(true); answer.textContent = '';
+  status.textContent = 'Extracting, embedding and indexing...';
+  const body = new FormData();
+  body.append('file', document.querySelector('#pdf').files[0]);
+  try {
+    await api('/api/upload', {method: 'POST', body});
+    await refresh();
+  } catch (error) {
+    answer.textContent = error.message;
+    try { await refresh(); } catch (refreshError) { status.textContent = refreshError.message; }
+  } finally { setBusy(false); }
+};
+document.querySelector('#ask').onsubmit = async event => {
+  event.preventDefault();
+  if (!current || busy) return;
+  setBusy(true); answer.textContent = 'Retrieving evidence...';
+  try {
+    const data = await api('/api/ask', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({document_id: current.document_id, question: document.querySelector('#question').value})
+    });
+    answer.textContent = data.answer;
+  } catch (error) { answer.textContent = error.message; }
+  finally {
+    try { await refresh(); } catch (error) { status.textContent = error.message; }
+    setBusy(false);
+  }
+};
+refresh().catch(error => { status.textContent = error.message; });
+</script>
+</html>

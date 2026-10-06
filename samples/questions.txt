@@ -1,0 +1,9 @@
+1. How long does the Moonflower workshop last?
+   Expected evidence: "The Moonflower workshop lasts 45 minutes." (moonflower.pdf, page 1)
+
+2. Who owns the workshop, and how long is the upload-and-questions activity?
+   Expected evidence: "The workshop owner is the Propel Enablement team."
+   and "Spend 20 minutes uploading a PDF and asking questions." (moonflower.pdf, page 2)
+
+3. What is the workshop's catering budget?
+   Deliberately unanswerable. Expected: "The document does not support an answer to this question."
