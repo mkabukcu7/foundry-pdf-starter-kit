@@ -1,0 +1,15 @@
+{
+  "name": "<dedicated-starter-kit-index-name>",
+  "fields": [
+    {"name": "id", "type": "Edm.String", "key": true, "filterable": true},
+    {"name": "document_id", "type": "Edm.String", "filterable": true},
+    {"name": "document_name", "type": "Edm.String"},
+    {"name": "page", "type": "Edm.Int32"},
+    {"name": "content", "type": "Edm.String", "searchable": true},
+    {"name": "vector", "type": "Collection(Edm.Single)", "searchable": true, "dimensions": 1536, "vectorSearchProfile": "pdf-profile"}
+  ],
+  "vectorSearch": {
+    "algorithms": [{"name": "pdf-hnsw", "kind": "hnsw"}],
+    "profiles": [{"name": "pdf-profile", "algorithm": "pdf-hnsw"}]
+  }
+}

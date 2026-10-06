@@ -1,0 +1,100 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 2
+/Kids [ 5 0 R 7 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+4 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+>>
+endobj
+5 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/Length 254
+>>
+stream
+BT /F1 12 Tf 50 740 Td 20 TL
+(Propel Moonflower Workshop - Synthetic Guide) Tj T*
+(This fictional guide contains no customer information.) Tj T*
+(The Moonflower workshop lasts 45 minutes.) Tj T*
+(Participants need a laptop and a text-based PDF.) Tj T*
+ET
+endstream
+endobj
+7 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 8 0 R
+>>
+endobj
+8 0 obj
+<<
+/Length 308
+>>
+stream
+BT /F1 12 Tf 50 740 Td 20 TL
+(Workshop agenda) Tj T*
+(Spend 10 minutes introducing grounding and citations.) Tj T*
+(Spend 20 minutes uploading a PDF and asking questions.) Tj T*
+(Spend 15 minutes reviewing answers and unsupported questions.) Tj T*
+(The workshop owner is the Propel Enablement team.) Tj T*
+ET
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000054 00000 n 
+0000000119 00000 n 
+0000000168 00000 n 
+0000000238 00000 n 
+0000000370 00000 n 
+0000000675 00000 n 
+0000000807 00000 n 
+trailer
+<<
+/Size 9
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+1166
+%%EOF
