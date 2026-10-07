@@ -1,8 +1,9 @@
 import json
 import os
 from dataclasses import asdict
-from pathlib import Path
+from io import BytesIO
 
+from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from azure.search.documents import SearchClient
@@ -24,6 +25,10 @@ def required(name: str) -> str:
 class AzureGateway:
     def __init__(self):
         self.credential = DefaultAzureCredential()
+        self.ocr_client = DocumentIntelligenceClient(
+            endpoint=required("DOCUMENT_INTELLIGENCE_ENDPOINT"), credential=self.credential,
+            connection_timeout=10, read_timeout=60,
+        )
         self.project = AIProjectClient(
             endpoint=required("FOUNDRY_PROJECT_ENDPOINT"), credential=self.credential,
         )
@@ -53,12 +58,42 @@ class AzureGateway:
             raise ServiceError("Search document_id must be filterable.")
 
     def close(self) -> None:
+        self.ocr_client.close()
         self.search.close()
         self.indexes.close()
         self.openai.close()
         self.embedding_client.close()
         self.project.close()
         self.credential.close()
+
+    def read_pages(self, data: bytes, pages: list[int]) -> dict[int, str]:
+        poller = self.ocr_client.begin_analyze_document(
+            "prebuilt-read", body=BytesIO(data), content_type="application/pdf",
+            pages=",".join(str(page) for page in pages),
+            string_index_type="unicodeCodePoint",
+        )
+        result = poller.result(timeout=180)
+        if not poller.done():
+            raise ServiceError("OCR timed out after 180 seconds; retry the upload.")
+        if result is None or result.pages is None:
+            raise ServiceError("OCR returned no page results.")
+        texts = {}
+        for page in result.pages:
+            if page.page_number is None or page.page_number in texts or page.spans is None:
+                raise ServiceError("OCR returned invalid page metadata.")
+            if result.content is None:
+                raise ServiceError("OCR returned no document content.")
+            parts = []
+            for span in page.spans:
+                if (
+                    span.offset is None or span.length is None
+                    or span.offset < 0 or span.length < 0
+                    or span.offset + span.length > len(result.content)
+                ):
+                    raise ServiceError("OCR returned invalid text spans.")
+                parts.append(result.content[span.offset:span.offset + span.length])
+            texts[page.page_number] = " ".join(parts)
+        return texts
 
     def embeddings(self, texts: list[str]) -> list[list[float]]:
         response = self.embedding_client.embeddings.create(
@@ -103,7 +138,6 @@ class AzureGateway:
 
     def select(self, question: str, chunks: list[Chunk]) -> Selection:
         response = self.openai.responses.create(
-            instructions=(Path(__file__).resolve().parents[1] / "agent-instructions.txt").read_text(encoding="utf-8"),
             input=[{
                 "role": "user",
                 "content": json.dumps({
@@ -112,11 +146,6 @@ class AzureGateway:
                 }),
             }],
             extra_body={"agent_reference": self.agent},
-            tool_choice="none",
-            text={"format": {
-                "type": "json_schema", "name": "grounded_selection", "strict": True,
-                "schema": Selection.model_json_schema(),
-            }},
             store=False,
         )
         if response.status != "completed":

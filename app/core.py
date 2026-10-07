@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from threading import Lock
-from typing import Protocol
+from typing import Callable, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,6 +13,7 @@ from pypdf.errors import PdfReadError
 MAX_BYTES = 5 * 1024 * 1024
 MAX_PAGES = 50
 MAX_CHUNKS = 500
+MAX_DOCUMENTS = 2
 UNSUPPORTED = "The document does not support an answer to this question."
 
 
@@ -50,13 +51,17 @@ class Selection(BaseModel):
 
 
 class Gateway(Protocol):
+    def read_pages(self, data: bytes, pages: list[int]) -> dict[int, str]: ...
     def index(self, chunks: list[Chunk]) -> None: ...
     def delete(self, keys: list[str]) -> None: ...
     def retrieve(self, question: str, document_id: str) -> list[Chunk]: ...
     def select(self, question: str, chunks: list[Chunk]) -> Selection: ...
 
 
-def extract_chunks(data: bytes, filename: str, content_type: str) -> list[Chunk]:
+def extract_chunks(
+    data: bytes, filename: str, content_type: str,
+    ocr: Callable[[bytes, list[int]], dict[int, str]] | None = None,
+) -> list[Chunk]:
     if not filename or "/" in filename or "\\" in filename or len(filename) > 180:
         raise UploadError("Use a plain PDF filename of at most 180 characters.")
     if not filename.lower().endswith(".pdf") or content_type not in {
@@ -73,31 +78,54 @@ def extract_chunks(data: bytes, filename: str, content_type: str) -> list[Chunk]
             raise UploadError("Encrypted PDFs are not supported.")
         if not 1 <= len(reader.pages) <= MAX_PAGES:
             raise UploadError("PDF must contain 1 to 50 pages.")
-        document_id = uuid4().hex
-        chunks = []
+        texts = []
+        ocr_pages = []
+        image_pages = set()
         for page_number, page in enumerate(reader.pages, start=1):
             text = " ".join((page.extract_text() or "").split())
-            for start in range(0, len(text), 1050):
-                content = text[start:start + 1200]
-                chunks.append(Chunk(
-                    f"{document_id}-{len(chunks)}", document_id,
-                    filename, page_number, content,
-                ))
-                if len(chunks) > MAX_CHUNKS:
-                    raise UploadError("PDF exceeds the 500-chunk text limit.")
-                if start + 1200 >= len(text):
-                    break
+            texts.append(text)
+            # Include image-bearing pages even when they also have a text layer.
+            if len(page.images):
+                image_pages.add(page_number)
+            if not text or page_number in image_pages:
+                ocr_pages.append(page_number)
     except (PdfReadError, ValueError, KeyError, TypeError, IndexError, RecursionError) as error:
         if isinstance(error, UploadError):
             raise
-        raise UploadError("Unable to read this PDF; upload a valid text-based PDF.") from error
+        raise UploadError("Unable to read this PDF; upload a valid PDF.") from error
+    if ocr_pages:
+        if ocr is None:
+            raise UploadError("This PDF requires OCR; configure Document Intelligence before uploading it.")
+        recognized = ocr(data, ocr_pages)
+        if set(recognized) != set(ocr_pages):
+            raise ServiceError("OCR did not return every requested page; document was not indexed.")
+        for page_number in ocr_pages:
+            text = " ".join(recognized[page_number].split())
+            if not text and (texts[page_number - 1] or page_number in image_pages):
+                raise UploadError(
+                    f"OCR found no readable text on image-bearing page {page_number}; "
+                    "upload a clearer scan or remove the blank image page."
+                )
+            texts[page_number - 1] = text
+    document_id = uuid4().hex
+    chunks = []
+    for page_number, text in enumerate(texts, start=1):
+        for start in range(0, len(text), 1050):
+            chunks.append(Chunk(
+                f"{document_id}-{len(chunks)}", document_id,
+                filename, page_number, text[start:start + 1200],
+            ))
+            if len(chunks) > MAX_CHUNKS:
+                raise UploadError("PDF exceeds the 500-chunk text limit.")
+            if start + 1200 >= len(text):
+                break
     if not chunks:
-        raise UploadError("No extractable text. Scanned PDFs requiring OCR are outside this starter kit's scope.")
+        raise UploadError("No readable text found. OCR cannot read a blank or illegible PDF.")
     return chunks
 
 
 class Library:
-    """One local user, one document, one process. Persist keys before Azure writes."""
+    """One local user, one document set, one process. Persist keys before Azure writes."""
 
     def __init__(self, gateway: Gateway, state_path: Path):
         self.gateway = gateway
@@ -118,11 +146,32 @@ class Library:
                     self.state["active"] is not None
                     and (
                         not isinstance(self.state["active"], dict)
-                        or set(self.state["active"]) != {"document_id", "document_name", "chunks"}
+                        or set(self.state["active"]) not in (
+                            {"document_id", "document_name", "chunks"},
+                            {"document_id", "document_name", "chunks", "documents"},
+                        )
                     )
                 )
             ):
                 raise ServiceError("Invalid runtime state; do not discard the indexed-key ledger.")
+            active = self.state["active"]
+            if active is not None and "documents" in active:
+                documents = active["documents"]
+                if (
+                    not isinstance(documents, list) or not 1 <= len(documents) <= MAX_DOCUMENTS
+                    or any(
+                        not isinstance(doc, dict)
+                        or set(doc) != {"document_id", "document_name", "chunks"}
+                        or not isinstance(doc["document_id"], str)
+                        or not isinstance(doc["document_name"], str)
+                        or not isinstance(doc["chunks"], int) or doc["chunks"] <= 0
+                        for doc in documents
+                    )
+                    or len({doc["document_id"] for doc in documents}) != len(documents)
+                    or len({doc["document_name"].casefold() for doc in documents}) != len(documents)
+                    or sum(doc["chunks"] for doc in documents) != active["chunks"]
+                ):
+                    raise ServiceError("Invalid document set state; preserve the indexed-key ledger.")
 
     def save(self) -> None:
         try:
@@ -139,7 +188,25 @@ class Library:
             return self.state["active"]
 
     def upload(self, data: bytes, filename: str, content_type: str) -> dict:
-        chunks = extract_chunks(data, filename, content_type)
+        return self.upload_many([(data, filename, content_type)])
+
+    def upload_many(self, files: list[tuple[bytes, str, str]]) -> dict:
+        if not 1 <= len(files) <= MAX_DOCUMENTS:
+            raise UploadError("Select one or two PDFs to upload together.")
+        if len({filename.casefold() for _, filename, _ in files}) != len(files):
+            raise UploadError("Use distinct filenames so citations identify each PDF.")
+        chunks = []
+        documents = []
+        for data, filename, content_type in files:
+            extracted = extract_chunks(data, filename, content_type, self.gateway.read_pages)
+            documents.append({
+                "document_id": extracted[0].document_id,
+                "document_name": filename,
+                "chunks": len(extracted),
+            })
+            chunks.extend(extracted)
+            if len(chunks) > MAX_CHUNKS:
+                raise UploadError("The document set exceeds the 500-chunk text limit.")
         with self.lock:
             # Invalidate first. A failed replacement must never expose old content.
             self.state["active"] = None
@@ -148,10 +215,10 @@ class Library:
             self.state["keys"] = [chunk.id for chunk in chunks]
             self.save()
             self.gateway.index(chunks)
-            self.state["active"] = {
-                "document_id": chunks[0].document_id,
-                "document_name": filename,
-                "chunks": len(chunks),
+            self.state["active"] = documents[0] if len(documents) == 1 else {
+                "document_id": uuid4().hex,
+                "document_name": " + ".join(doc["document_name"] for doc in documents),
+                "chunks": len(chunks), "documents": documents,
             }
             self.save()
             return self.state["active"]
@@ -161,10 +228,16 @@ class Library:
             active = self.state["active"]
             if active is None or active["document_id"] != document_id:
                 raise StateConflict("Upload a PDF or refresh: this document is no longer current.")
-            chunks = self.gateway.retrieve(question, document_id)
-            # Defense in depth even if a retrieval implementation ignores its filter.
-            if any(c.document_id != document_id or c.document_name != active["document_name"] for c in chunks):
-                raise ServiceError("Retrieval returned content outside the current document.")
+            chunks = []
+            for document in active.get("documents", [active]):
+                retrieved = self.gateway.retrieve(question, document["document_id"])
+                # Validate each retrieval independently, not just membership in the set.
+                if any(
+                    c.document_id != document["document_id"]
+                    or c.document_name != document["document_name"] for c in retrieved
+                ):
+                    raise ServiceError("Retrieval returned content outside the current document.")
+                chunks.extend(retrieved)
             if not chunks:
                 return {"supported": False, "answer": UNSUPPORTED, "citations": []}
             selection = self.gateway.select(question, chunks)

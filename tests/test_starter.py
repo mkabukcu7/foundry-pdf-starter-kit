@@ -19,6 +19,7 @@ from app.core import (
     StateConflict, UNSUPPORTED, UploadError, extract_chunks,
 )
 from app.main import create_app
+from app.setup_agent import agent_definition
 from samples.make_sample import PAGES, make_pdf
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,9 @@ class FakeGateway:
         self.fail_index = False
         self.selection = None
         self.selected_chunks = []
+
+    def read_pages(self, data, pages):
+        return {page: "" for page in pages}
 
     def delete(self, keys):
         if self.fail_delete:
@@ -179,7 +183,7 @@ def test_inconsistent_agent_support_rejected(library, selection):
     ("a.pdf", "application/pdf", b"%PDF-1.7\ncorrupt", "Unable to read"),
     ("a.pdf", "application/pdf", make_pdf([[]]), "OCR"),
     ("a.pdf", "application/pdf", make_pdf([["test"]] * 51), "50 pages"),
-])
+], ids=lambda value: f"{len(value)}-bytes" if isinstance(value, bytes) else None)
 def test_upload_validation(name, mime, data, message):
     with pytest.raises(UploadError, match=message):
         extract_chunks(data, name, mime)
@@ -242,7 +246,7 @@ def test_http_upload_ask_validation_and_stale_tab(library):
         assert client.post("/api/ask", json=body).status_code == 409
         assert client.get("/", headers={"Origin": "https://untrusted.example"}).status_code == 403
         assert client.get("/", headers={"Host": "untrusted.example"}).status_code == 403
-        assert client.post("/api/upload", content=b"x" * (MAX_BYTES + 65537)).status_code == 413
+        assert client.post("/api/upload", content=b"x" * (MAX_BYTES * 2 + 65537)).status_code == 413
 
 
 def test_nonlocal_browser_blocked(library):
@@ -324,11 +328,25 @@ def test_sdk_index_schema_is_compatible():
     assert fields["vector"].vector_search_profile_name == "pdf-profile"
 
 
-def test_foundry_sdk_serializes_reference_schema_and_untrusted_data():
+def test_agent_definition_preserves_grounding_schema_and_no_tools():
+    definition = agent_definition("pdf-answer-model").as_dict()
+    assert definition["kind"] == "prompt"
+    assert definition["model"] == "pdf-answer-model"
+    assert definition["instructions"] == (ROOT / "agent-instructions.txt").read_text(encoding="utf-8")
+    assert "untrusted data" in definition["instructions"]
+    assert definition["tools"] == []
+    assert definition["tool_choice"] == "none"
+    assert definition["text"]["format"]["strict"] is True
+    assert definition["text"]["format"]["schema"] == Selection.model_json_schema()
+
+
+def test_foundry_sdk_serializes_reference_without_agent_configuration_overrides():
     captured = []
 
     def handler(request):
         captured.append(json.loads(request.content))
+        forbidden = {"instructions", "text", "tools", "tool_choice", "model", "temperature"}
+        assert forbidden.isdisjoint(captured[-1])
         return httpx.Response(200, json={
             "id": "resp_test", "object": "response", "created_at": 0,
             "status": "completed", "model": "test", "output": [{
@@ -363,9 +381,6 @@ def test_foundry_sdk_serializes_reference_schema_and_untrusted_data():
     body = captured[0]
     assert body["agent_reference"] == gateway.agent
     assert body["store"] is False
-    assert body["tool_choice"] == "none"
-    assert "untrusted data" in body["instructions"]
-    assert body["text"]["format"]["strict"] is True
     payload = json.loads(body["input"][0]["content"])
     assert payload["untrusted_retrieved_passages"][0]["content"] == injected.content
 

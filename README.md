@@ -1,15 +1,16 @@
 # Propel Microsoft Foundry PDF starter kit
 
 A consumable, standalone hello-world for the Propel Enablement team: upload one
-text-based PDF, retrieve passages from Azure AI Search, and ask one Microsoft
+or two text-based, scanned, or mixed PDFs together, retrieve passages from Azure AI Search, and ask one Microsoft
 Foundry Knowledge Librarian agent to select grounded evidence with citations.
 This repository is self-contained and does not import the original demo.
 
 **Intentionally small:** Python + FastAPI + one HTML page; one local user, one
-current document, one process. No SharePoint, classification, taxonomy, approvals,
+current document set, one process. No SharePoint, classification, taxonomy, approvals,
 write-back, MCP, Fabric, frontend build system, agent tools, or chat history.
-Scanned PDFs requiring OCR are outside scope. Blank/image-only pages are skipped;
-mixed PDFs expose only their extractable text, not their images or scanned pages.
+Image-bearing and textless pages use Azure Document Intelligence Read OCR.
+Text-only pages are extracted locally. Blank pages without images can be skipped;
+unreadable image pages are rejected rather than silently omitted.
 
 ## What was reused
 
@@ -48,8 +49,9 @@ records in your dedicated Search index**, as required for PDF replacement.
 | Microsoft Foundry resource and project | Copy the project endpoint in the form `https://<resource>.services.ai.azure.com/api/projects/<project>`. Use a current Foundry project supporting versioned prompt agents and the Responses API, not a classic hub-only endpoint. |
 | Answer model deployment | Deploy a model supporting structured JSON-schema outputs and prompt agents, for example `gpt-4.1-mini` if offered in your region. This deployment is chosen on the agent, not by the local code. |
 | Embedding deployment | Deploy `text-embedding-3-small`. Set its **deployment name**, not necessarily its model name, and its resource's Azure OpenAI endpoint (`https://<resource>.openai.azure.com`) in `.env`. Copy that endpoint from the deployment's connection details, not the project URL. This sample fixes dimensions at **1536**. |
-| One prompt agent | In Foundry, create a prompt agent using the answer deployment, paste `agent-instructions.txt` as its instructions, configure **no tools**, and publish/save a version. Copy its name and version into `.env`. The app also supplies these instructions on each request and disables tool use. Do not point at the existing enterprise librarian. |
+| One prompt agent | Create a dedicated agent version with `python -m app.setup_agent --name pdf-knowledge-librarian --model "<answer-deployment-name>"` after configuring the project endpoint and signing in. This explicit setup command saves `agent-instructions.txt`, **no tools**, disabled tool use, and the strict `Selection` JSON schema on the agent definition, then verifies the saved version. Copy the printed name/version into `.env`. Do not point at the existing enterprise librarian. |
 | Azure AI Search service and index | Enable role-based data access (RBAC) and vector search. Create a **new dedicated index** using `search-index.json`, replacing its `name` placeholder. A vector-capable Basic or higher service is a straightforward choice; check regional/tier availability and limits. No semantic ranker, indexer, skillset, blob storage, or Search-to-Foundry connection is needed. |
+| Document Intelligence Read OCR | Use an S0 Document Intelligence or compatible multi-service resource. Set `DOCUMENT_INTELLIGENCE_ENDPOINT` to its custom-subdomain endpoint, such as `https://<resource>.cognitiveservices.azure.com/`. Verify `prebuilt-read` is available in its region. Free-tier analysis processes only two pages and is unsuitable for this demo's 50-page limit. No OCR model training, deployment, or blob storage is required. |
 
 An administrator can create the index with the Azure portal's index JSON editor,
 or use the Search data-plane REST API `PUT /indexes/<index>?api-version=2024-07-01`
@@ -64,6 +66,7 @@ Assign roles to the **identity that runs the local Python process**:
 | Foundry project | **Azure AI User** for invoking the configured agent and models. Verify its inherited model-deployment access; where required by your resource's RBAC configuration, grant **Cognitive Services OpenAI User** on the Foundry resource for model/embedding inference. Agent/model creation needs separate administrator/developer rights during manual setup. |
 | Search service | **Search Index Data Contributor** for querying, uploading, and deleting document records. |
 | Search service | **Search Service Contributor** for reading index definitions during startup validation. This built-in role has broader schema-management rights than the app uses; use a custom least-privilege schema-read role if desired. |
+| OCR resource | **Cognitive Services User** (or an existing role granting document-analysis access) for Entra-authenticated Read analysis. |
 
 The Foundry agent itself does not query Search. The local backend retrieves and
 passes evidence, so its Entra identity needs the above access; no Search role
@@ -71,11 +74,22 @@ assignment to an agent identity is necessary for this flow.
 Allow your workstation through service firewalls/private networking. Role
 assignments can take several minutes to propagate.
 
+The administrator-only `app.setup_agent` command uses your Azure CLI identity
+and creates an agent version; it is not part of application startup. It refuses
+to change an existing agent unless `--new-version` is explicitly supplied.
+The running app sends only the agent reference and untrusted question/passages,
+with response storage disabled. Foundry does not permit request-level
+`instructions` or `text` overrides when an agent is specified. If instructions
+or `Selection` change, create a new agent version and update `.env`; restart
+the server after changing its code or configuration.
+
 **Costs:** Search generally incurs ongoing service charges even while idle.
 Embeddings and agent calls incur model usage charges; additional agent/platform
 charges may apply. Check current regional pricing and quotas before manual setup.
 Each upload embeds its text; each question embeds the question and makes at most
-one agent call. Tests use doubles and incur no Azure charges. The app does not
+one agent call. OCR adds per-page charges and upload latency. PDFs containing
+images or textless pages are sent to the configured OCR service, with only those
+pages selected for analysis. Tests use doubles and incur no Azure charges. The app does not
 delete resources or automatically clean the index on shutdown.
 
 ## Setup and run
@@ -90,8 +104,8 @@ cp .env.example .env
 ```
 
 On Windows PowerShell use `.\.venv\Scripts\Activate.ps1` and
-`Copy-Item .env.example .env` instead. Fill the seven placeholders in `.env` with
-resource endpoints, deployment name, agent name/version and dedicated index name.
+`Copy-Item .env.example .env` instead. Fill the eight settings in `.env` with
+resource endpoints (including OCR), deployment name, agent name/version and dedicated index name.
 There are no API keys or secrets in this configuration.
 
 ```bash
@@ -106,6 +120,18 @@ adapted environment). It does **not** sign browser users in. Do not expose this
 sample on a network, run multiple workers/replicas, trust proxy forwarding, or
 use it as a multi-user authorization example.
 
+In VS Code, **Terminal > Run Task > Run PDF demo** starts the same command in
+a visible integrated terminal. **F5 > Debug PDF demo** uses the Python Debugger
+extension and the local `.venv`. Stop any existing server with Ctrl+C before
+starting another on port 8000. The agent itself is a hosted prompt definition,
+not a locally hosted agent server, so these configurations debug the FastAPI
+backend rather than launch an Agent Inspector server.
+
+The browser UI has separate source-upload and question panels, current-source
+status, and a grounded-answer area. It stacks the panels on narrow screens and
+supports keyboard navigation. Uploads remain PDF-only; DOCX, spreadsheets, and
+other document formats are not accepted.
+
 ## Ingest and ask
 
 Upload `samples/moonflower.pdf` (synthetic, two pages), then try:
@@ -119,15 +145,39 @@ Upload `samples/moonflower.pdf` (synthetic, two pages), then try:
 `python samples/make_sample.py`; no PDF-generation dependency is added.
 
 Ingestion validates extension, MIME type, PDF signature, encryption, size (5 MiB),
-pages (50), and text/chunk count (500). It extracts and normalizes text per page,
+pages (50 per PDF), and text/chunk count (500 across the set). Select one or two
+PDFs together; a third file or duplicate filenames (case-insensitive) are rejected.
+Every upload replaces the whole set, not just one file. Both PDFs are extracted
+and validated before the existing set is invalidated. If either fails extraction
+or OCR, the previous set remains usable. Azure indexing failures after replacement
+begins disable Q&A until a successful retry, as before.
+The HTTP request limit is 10 MiB plus multipart overhead, while each PDF remains
+limited to 5 MiB. It extracts and normalizes text per page,
+using `prebuilt-read` OCR for image-bearing or textless pages, including pages
+with both images and a text layer. OCR text replaces the local extraction on
+those pages to avoid duplicate text. Original PDF page numbers are preserved.
+All requested OCR pages must be returned; missing pages, invalid spans, service
+errors and timeouts fail the upload before replacing the current document.
+Blank pages without images may remain empty, but image-bearing pages with no
+readable OCR text are rejected. Uploads wait for OCR (up to 180 seconds of polling),
+so larger scans can take noticeably longer. A timed-out cloud analysis is not
+cancelled and may still incur charges.
+The pipeline then
 chunks **within** pages, embeds batches of 16, and uploads text, vectors, document
 UUID/name, page number, and chunk ID. Page numbers are physical PDF pages, not
-printed page labels. Layout, tables, complex reading order and images are not
-interpreted.
+printed page labels. OCR recognizes image text, not general image meaning;
+table structure and complex reading order are not interpreted. OCR may misread
+characters or numbers, so citations quote normalized extracted text, not a
+guaranteed faithful transcription of the original scan. Review important facts
+against the original PDF.
 
 Questions use hybrid keyword/vector retrieval, with `document_id` **pre-filtering**
-and top 5 results. The application checks the returned document identity again.
-The agent selects up to three verbatim evidence quotes or explicitly abstains.
+and top 5 results **per PDF** (at most 10 passages). Each PDF has its own UUID;
+two-file uploads also have a set UUID used for stale-tab checks. The application
+checks each retrieval's document identity again before combining evidence.
+Single-PDF state remains compatible with existing runtime ledgers and API clients.
+Multipart uploads use repeated `file` fields for two PDFs.
+The agent selects up to three verbatim evidence quotes across the set or explicitly abstains.
 The backend verifies every selected chunk ID and exact quote, then builds each
 citation from indexed metadata, never model-invented filenames/pages.
 
@@ -195,7 +245,8 @@ python -m pip check
 
 `--confcutdir=tests` isolates this standalone suite from the parent demo's
 `conftest.py`. Tests cover scoping, same-name replacement, citations/pages,
-unsupported questions, malformed/oversized/encrypted/scanned uploads, partial
+unsupported questions, malformed/oversized/encrypted uploads, scanned/mixed OCR
+page handling, OCR errors/timeouts, partial
 index/delete failures, restart recovery, local-only HTTP access, and installed
 SDK wire shapes. They use synthetic PDFs, an in-memory Search double and a
 mock HTTP transport; they do **not** establish live model abstention or resistance
@@ -209,13 +260,26 @@ instructions" and verify it does not override the evidence-selection rules.
 Search may take seconds to make an acknowledged upload queryable; retry a
 question if immediate retrieval returns no passages.
 
-No live Azure calls were made while building this kit. Use the handoff's local
-test results as offline evidence only; the above live checks remain necessary.
+Live smoke verification on October 6, 2026 passed with a dedicated, tool-free
+`gpt-4.1` prompt agent: sample upload indexed two chunks, both supported sample
+questions returned the expected verbatim quotes and page citations, and the
+catering-budget question returned the exact unsupported response with no
+citations. OCR smoke checks also passed with a genuine image-only PDF and a mixed
+PDF: the scanned fact was recognized, indexed, and cited on physical pages 1
+and 2 respectively, and unsupported questions returned no citations. The
+original sample PDF was restored afterward. These checks are not evidence for arbitrary PDFs or prompt-injection
+resistance; the broader live checks above remain necessary.
 
-Local build verification: **37 starter-kit tests and 207 existing demo tests
-passed**, with no failures. `pip check` reported no dependency conflicts. Both
-suites emitted one upstream Starlette/AnyIO deprecation warning. These results
-are not live Azure end-to-end results.
+Two-document live smoke checks passed with two PDFs uploaded in one request:
+a question spanning both returned exact evidence with separate filenames and
+pages 1 and 2; an unsupported question abstained; third-file and invalid-second-file
+uploads were rejected without replacing the active set; and replacing the pair
+with the original single-PDF sample caused the old set UUID to receive HTTP 409.
+
+Current local verification: **65 starter-kit tests passed**, with no failures.
+`pip check` reported no dependency conflicts. The suite emitted one upstream
+Starlette/AnyIO deprecation warning. These offline results are distinct from the
+live Azure smoke checks above.
 
 ## Troubleshooting
 
@@ -226,15 +290,16 @@ are not live Azure end-to-end results.
 | 403 from Azure | Check role scope, propagation, and service firewall/private endpoint access. The backend, not the browser or agent identity, needs Search permissions. |
 | 404 from Foundry | Verify the project endpoint, deployed embedding name and saved prompt-agent name/version. Hub/classic agent SDK patterns are not interchangeable. |
 | Embedding endpoint error | Use the resource's Azure OpenAI endpoint, not the project endpoint; verify that the embedding deployment exists in that resource and supports API version `2024-10-21`. |
-| Agent rejects schema or tool choice | Choose an agent/model that supports Responses structured outputs. Do not replace this with a chat-completions-only endpoint. |
+| Agent rejects schema or tool choice | Use `app.setup_agent` to configure instructions, strict JSON schema, and disabled tools on the agent version, not the Responses request. Choose a model supporting structured outputs. Do not replace this with a chat-completions-only endpoint. |
 | Search schema/dimension error | Create the dedicated index exactly from `search-index.json`; use `text-embedding-3-small` with 1536 dimensions. Do not alter the demo index. |
 | 503 / replacement failed | Read server logs; fix RBAC, quota, service availability, disk permission, or per-record indexing failure. Retry upload; Q&A stays disabled until it succeeds. Do not discard the ledger. |
-| No extractable text / OCR message | Use a text-based PDF; OCR and encrypted PDFs are unsupported. |
+| OCR 401/403/endpoint failure | Check `DOCUMENT_INTELLIGENCE_ENDPOINT`, Entra document-analysis permissions, and network access. Use an S0 OCR-capable resource; text-only PDFs do not invoke OCR. |
+| No readable text / OCR message | Upload a clearer scan; remove blank image pages. Fully blank or illegible PDFs and encrypted PDFs are unsupported. |
 | Unexpected unsupported answer | Wait briefly after indexing, rephrase a specific question, and check whether the PDF contains text evidence. Retrieval is limited to five chunks. |
 | 409 from Q&A | Another tab replaced the PDF; refresh to get the active document UUID. |
 | 403 from this app | Use the same loopback origin, no reverse proxy. The sample intentionally rejects remote clients, foreign origins and foreign Host headers. |
 
 Do not upload confidential material into an unapproved Azure environment. Server
 logs can contain provider error details; keep them private. There is no production
-hardening, OCR, multi-user isolation, telemetry service, document download viewer,
+hardening, multi-user isolation, telemetry service, document download viewer,
 or automated provisioning in this starter kit.

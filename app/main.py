@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from .azure import AzureGateway
-from .core import MAX_BYTES, Library, ServiceError, StateConflict, UploadError
+from .core import MAX_BYTES, MAX_DOCUMENTS, Library, ServiceError, StateConflict, UploadError
 
 ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger(__name__)
@@ -62,8 +62,8 @@ def create_app(library: Library | None = None) -> FastAPI:
                 length = 0
             if length <= 0:
                 return JSONResponse(status_code=411, content={"detail": "Uploads require Content-Length (browser FormData supplies it)."})
-            if length > MAX_BYTES + 64 * 1024:
-                return JSONResponse(status_code=413, content={"detail": "Upload exceeds the 5 MiB PDF limit."})
+            if length > MAX_BYTES * MAX_DOCUMENTS + 64 * 1024:
+                return JSONResponse(status_code=413, content={"detail": "Upload exceeds the two-PDF, 10 MiB total limit."})
         return await call_next(request)
 
     @app.exception_handler(ServiceError)
@@ -86,16 +86,24 @@ def create_app(library: Library | None = None) -> FastAPI:
         return {"document": request.app.state.library.current()}
 
     @app.post("/api/upload")
-    async def upload(request: Request, file: UploadFile = File(...)):
+    async def upload(request: Request, file: list[UploadFile] = File(...)):
         try:
-            data = await file.read(MAX_BYTES + 1)
+            if not 1 <= len(file) <= MAX_DOCUMENTS:
+                raise UploadError("Select one or two PDFs to upload together.")
+            files = []
+            for item in file:
+                data = await item.read(MAX_BYTES + 1)
+                if not data or len(data) > MAX_BYTES:
+                    raise UploadError("Each PDF must be non-empty and no larger than 5 MiB.")
+                files.append((data, item.filename or "", item.content_type or ""))
             return await run_in_threadpool(
-                request.app.state.library.upload, data, file.filename or "", file.content_type or "",
+                request.app.state.library.upload_many, files,
             )
         except UploadError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         finally:
-            await file.close()
+            for item in file:
+                await item.close()
 
     @app.post("/api/ask")
     def ask(body: Question, request: Request):

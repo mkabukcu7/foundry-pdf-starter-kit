@@ -1,30 +1,90 @@
 <!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Propel PDF Knowledge Librarian</title>
 <style>
-body {font: 17px system-ui; max-width: 800px; margin: 3rem auto; padding: 1rem;}
-input, button, textarea {font: inherit; margin: .5rem 0; padding: .5rem;}
-textarea {width: 95%; height: 5rem;} pre {white-space: pre-wrap;}
-button:disabled {opacity: .5;} #status {color: #333;}
+:root {color-scheme: light; --ink: #192741; --muted: #52627b; --accent: #315bc9; --border: #dce3ee;}
+* {box-sizing: border-box;}
+body {margin: 0; font: 16px/1.6 system-ui, sans-serif; color: var(--ink); background: #f3f6fb;}
+main {max-width: 1120px; margin: auto; padding: 48px 24px;}
+.eyebrow {font-size: 12px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; color: var(--accent);}
+h1 {font-size: clamp(30px, 5vw, 44px); letter-spacing: -.035em; line-height: 1.15; margin: 12px 0 16px;}
+h2 {font-size: 21px; margin: 0 0 8px;}
+p {margin: 0 0 16px;}
+.intro {max-width: 720px; color: var(--muted);}
+.badges {display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 28px;}
+.badge {border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 650; background: white;}
+.workspace {display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 24px; align-items: start;}
+.card {background: white; border: 1px solid var(--border); border-radius: 18px; padding: 28px; box-shadow: 0 6px 24px #19274106; min-width: 0;}
+.step {display: inline-block; color: var(--accent); font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px;}
+.hint {font-size: 13px; color: var(--muted);}
+label {display: block; font-size: 14px; font-weight: 650; margin-bottom: 8px;}
+input, button, textarea {font: inherit;}
+input[type=file] {width: 100%; min-width: 0; padding: 18px 12px; border: 1px dashed #aabbd7; border-radius: 12px; background: #f8faff; font-size: 13px; margin: 6px 0 12px;}
+input::file-selector-button {font: inherit; font-weight: 650; color: var(--accent); border: 1px solid var(--border); background: white; border-radius: 7px; padding: 8px 10px; margin-right: 10px; cursor: pointer;}
+button {border: 0; background: var(--accent); color: white; font-weight: 650; padding: 11px 18px; border-radius: 9px; cursor: pointer;}
+button:hover:not(:disabled) {background: #2447a5;}
+button:disabled {opacity: .5; cursor: not-allowed;}
+input:focus-visible, button:focus-visible, textarea:focus-visible {outline: 3px solid #86a6ff; outline-offset: 3px;}
+textarea {display: block; width: 100%; min-height: 130px; resize: vertical; border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin: 0 0 14px; color: var(--ink);}
+.current {margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border);}
+#status {font-size: 14px; overflow-wrap: anywhere; margin: 0;}
+.answer-box {margin-top: 24px; background: #f8faff; border: 1px solid var(--border); border-radius: 12px; padding: 20px;}
+.answer-label {font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; margin-bottom: 12px;}
+#answer {margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit;}
+#answer:empty::before {content: "Your answer and document/page citations will appear here."; color: var(--muted); font-size: 14px;}
+#answer[data-error=true] {color: #a12832;}
+footer {margin-top: 24px; color: var(--muted); font-size: 12px;}
+@media (max-width: 760px) {.workspace {grid-template-columns: 1fr;} main {padding: 28px 16px;} .card {padding: 22px;}}
 </style>
+</head>
+<body>
+<main>
+<header>
+<div class="eyebrow">Propel / Microsoft Foundry demo</div>
 <h1>PDF Knowledge Librarian</h1>
-<p>Upload one text-based PDF, then ask about it. Answers are verbatim evidence with
-document and page citations. Scanned PDFs requiring OCR are out of scope.</p>
-<p>This is a single-user local demo. Uploading replaces the current document for every tab.</p>
+<p class="intro">Turn your PDFs into a grounded conversation. Upload one or two documents,
+ask a question, and get evidence you can trace back to the source.</p>
+<div class="badges"><span class="badge">PDF only</span><span class="badge">Scanned PDFs supported</span><span class="badge">Source &amp; page citations</span></div>
+</header>
+<div class="workspace">
+<section class="card" aria-labelledby="upload-heading">
+<span class="step">Step 1 / Add your sources</span>
+<h2 id="upload-heading">Your documents</h2>
+<p class="hint">Select one or two PDFs together. Text-based, scanned, and mixed PDFs are supported.</p>
 <form id="upload">
-  <label for="pdf">PDF (5 MiB, 50 pages maximum)</label><br>
-  <input id="pdf" type="file" accept=".pdf,application/pdf" required>
-  <button>Upload / replace</button>
+  <label for="pdf">Choose PDF files</label>
+  <input id="pdf" type="file" accept=".pdf,application/pdf" multiple required aria-describedby="upload-limits replacement-note">
+  <p class="hint" id="upload-limits">Up to 5 MiB and 50 pages per PDF. Maximum 500 chunks across both files.</p>
+  <button type="submit">Upload documents</button>
+  <p class="hint" id="replacement-note" style="margin: 12px 0 0;">Uploading replaces the entire current set. Questions search both PDFs.</p>
 </form>
-<p id="status" role="status"></p>
+<div class="current">
+<div class="answer-label">Current sources</div>
+<p id="status" role="status" aria-live="polite">Loading current sources...</p>
+</div>
+</section>
+<section class="card" aria-labelledby="ask-heading">
+<span class="step">Step 2 / Explore the evidence</span>
+<h2 id="ask-heading">Ask your documents</h2>
+<p class="hint">Ask a specific question about either PDF or both. If the sources do not support an answer, we will say so.</p>
 <form id="ask">
-  <label for="question">Question about the current PDF</label>
-  <textarea id="question" maxlength="2000" required></textarea>
-  <button id="ask-button" disabled>Ask</button>
+  <label for="question">Your question</label>
+  <textarea id="question" maxlength="2000" required placeholder="For example: How long does each workshop last?"></textarea>
+  <button id="ask-button" type="submit" disabled>Find an answer</button>
 </form>
+<div class="answer-box">
+<div class="answer-label">Grounded answer</div>
 <pre id="answer" aria-live="polite"></pre>
+</div>
+</section>
+</div>
+<footer>Single-user local demo. Uploads replace sources for every tab. Image-bearing and textless pages use
+Azure Document Intelligence OCR, which adds processing time and can make recognition errors.
+Answers quote extracted text; verify important facts against the original PDF.</footer>
+</main>
 <script>
 let current = null;
 let busy = false;
@@ -32,10 +92,16 @@ const status = document.querySelector('#status');
 const answer = document.querySelector('#answer');
 const askButton = document.querySelector('#ask-button');
 const uploadButton = document.querySelector('#upload button');
+function showAnswer(text, isError = false) {
+  answer.textContent = text;
+  answer.dataset.error = String(isError);
+}
 function setBusy(value) {
   busy = value;
   uploadButton.disabled = busy;
   askButton.disabled = busy || !current;
+  document.querySelector('.workspace').setAttribute('aria-busy', String(busy));
+  uploadButton.textContent = busy ? 'Please wait...' : 'Upload documents';
 }
 async function api(url, options) {
   const response = await fetch(url, options);
@@ -45,35 +111,44 @@ async function api(url, options) {
 }
 async function refresh() {
   current = (await api('/api/document')).document;
-  status.textContent = current ? `Current: ${current.document_name} (${current.chunks} chunks)` : 'Upload a PDF to begin.';
+  status.textContent = current ? `Current: ${(current.documents || [current]).map(doc => `${doc.document_name} (${doc.chunks} chunks)`).join(' + ')}` : 'Upload one or two PDFs to begin.';
   askButton.disabled = busy || !current;
 }
 document.querySelector('#upload').onsubmit = async event => {
   event.preventDefault();
   if (busy) return;
-  setBusy(true); answer.textContent = '';
-  status.textContent = 'Extracting, embedding and indexing...';
+  const files = Array.from(document.querySelector('#pdf').files);
+  if (files.length < 1 || files.length > 2) {
+    showAnswer('Select one or two PDFs to upload together.', true);
+    return;
+  }
+  if (files.some(file => file.size > 5 * 1024 * 1024)) {
+    showAnswer('Each PDF must be no larger than 5 MiB.', true);
+    return;
+  }
+  setBusy(true); showAnswer('');
+  status.textContent = 'Extracting text, running OCR if needed, embedding and indexing...';
   const body = new FormData();
-  body.append('file', document.querySelector('#pdf').files[0]);
+  files.forEach(file => body.append('file', file));
   try {
     await api('/api/upload', {method: 'POST', body});
     await refresh();
   } catch (error) {
-    answer.textContent = error.message;
+    showAnswer(error.message, true);
     try { await refresh(); } catch (refreshError) { status.textContent = refreshError.message; }
   } finally { setBusy(false); }
 };
 document.querySelector('#ask').onsubmit = async event => {
   event.preventDefault();
   if (!current || busy) return;
-  setBusy(true); answer.textContent = 'Retrieving evidence...';
+  setBusy(true); showAnswer('Retrieving evidence...');
   try {
     const data = await api('/api/ask', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({document_id: current.document_id, question: document.querySelector('#question').value})
     });
-    answer.textContent = data.answer;
-  } catch (error) { answer.textContent = error.message; }
+    showAnswer(data.answer);
+  } catch (error) { showAnswer(error.message, true); }
   finally {
     try { await refresh(); } catch (error) { status.textContent = error.message; }
     setBusy(false);
@@ -81,4 +156,5 @@ document.querySelector('#ask').onsubmit = async event => {
 };
 refresh().catch(error => { status.textContent = error.message; });
 </script>
+</body>
 </html>
