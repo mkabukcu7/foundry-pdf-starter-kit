@@ -1,0 +1,122 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {"type": "string"},
+    "foundryName": {"type": "string"},
+    "searchName": {"type": "string"},
+    "ocrName": {"type": "string"},
+    "projectName": {"type": "string", "defaultValue": "pdf-starter"},
+    "answerModel": {"type": "string", "defaultValue": "gpt-4.1"},
+    "answerModelVersion": {"type": "string", "defaultValue": "2025-04-14"},
+    "answerSku": {"type": "string", "defaultValue": "GlobalStandard"},
+    "answerCapacity": {"type": "int", "defaultValue": 1, "minValue": 1},
+    "embeddingModelVersion": {"type": "string", "defaultValue": "1"},
+    "embeddingSku": {"type": "string", "defaultValue": "Standard"},
+    "embeddingCapacity": {"type": "int", "defaultValue": 1, "minValue": 1}
+  },
+  "resources": [
+    {
+      "type": "Microsoft.CognitiveServices/accounts",
+      "apiVersion": "2025-06-01",
+      "name": "[parameters('foundryName')]",
+      "location": "[parameters('location')]",
+      "kind": "AIServices",
+      "sku": {"name": "S0"},
+      "identity": {"type": "SystemAssigned"},
+      "properties": {
+        "customSubDomainName": "[parameters('foundryName')]",
+        "allowProjectManagement": true,
+        "disableLocalAuth": true,
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/projects",
+      "apiVersion": "2025-06-01",
+      "name": "[concat(parameters('foundryName'), '/', parameters('projectName'))]",
+      "location": "[parameters('location')]",
+      "identity": {"type": "SystemAssigned"},
+      "dependsOn": ["[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryName'))]"],
+      "properties": {
+        "displayName": "Propel PDF starter kit",
+        "description": "Dedicated project for the local PDF demo."
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "apiVersion": "2025-06-01",
+      "name": "[concat(parameters('foundryName'), '/pdf-answer')]",
+      "dependsOn": ["[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryName'))]"],
+      "sku": {"name": "[parameters('answerSku')]", "capacity": "[parameters('answerCapacity')]"},
+      "properties": {
+        "model": {
+          "format": "OpenAI",
+          "name": "[parameters('answerModel')]",
+          "version": "[parameters('answerModelVersion')]"
+        },
+        "versionUpgradeOption": "NoAutoUpgrade"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "apiVersion": "2025-06-01",
+      "name": "[concat(parameters('foundryName'), '/pdf-embedding')]",
+      "dependsOn": ["[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryName'))]"],
+      "sku": {"name": "[parameters('embeddingSku')]", "capacity": "[parameters('embeddingCapacity')]"},
+      "properties": {
+        "model": {"format": "OpenAI", "name": "text-embedding-3-small", "version": "[parameters('embeddingModelVersion')]"},
+        "versionUpgradeOption": "NoAutoUpgrade"
+      }
+    },
+    {
+      "type": "Microsoft.Search/searchServices",
+      "apiVersion": "2023-11-01",
+      "name": "[parameters('searchName')]",
+      "location": "[parameters('location')]",
+      "sku": {"name": "basic"},
+      "properties": {
+        "replicaCount": 1,
+        "partitionCount": 1,
+        "hostingMode": "default",
+        "disableLocalAuth": true,
+        "publicNetworkAccess": "enabled"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts",
+      "apiVersion": "2025-06-01",
+      "name": "[parameters('ocrName')]",
+      "location": "[parameters('location')]",
+      "kind": "FormRecognizer",
+      "sku": {"name": "S0"},
+      "properties": {
+        "customSubDomainName": "[parameters('ocrName')]",
+        "disableLocalAuth": true,
+        "publicNetworkAccess": "Enabled"
+      }
+    }
+  ],
+  "outputs": {
+    "foundryResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryName'))]"
+    },
+    "projectResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('foundryName'), parameters('projectName'))]"
+    },
+    "projectPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('foundryName'), parameters('projectName')), '2025-06-01', 'Full').identity.principalId]"
+    },
+    "searchResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Search/searchServices', parameters('searchName'))]"
+    },
+    "ocrResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('ocrName'))]"
+    }
+  }
+}

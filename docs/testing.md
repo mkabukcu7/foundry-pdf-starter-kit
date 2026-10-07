@@ -22,10 +22,16 @@ metadata, unsupported questions, upload validation, scanned/mixed OCR handling,
 OCR errors/timeouts, partial index/delete failures, restart recovery,
 local-only HTTP access, and installed SDK request shapes.
 
-The current code's recorded local result is **65 passing tests**, no failures,
+Optional provisioning tests also cover preview safety (no Azure calls/writes),
+CLI orchestration, template structure, `.env` preservation, bounded access retries,
+and reuse/refusal of existing index/agent configurations.
+
+The current code's recorded local result is **88 passing tests**, no failures,
 and no dependency conflicts from `pip check`. One upstream Starlette/AnyIO
 deprecation warning is emitted. These tests do not establish live model abstention,
-OCR accuracy, or prompt-injection resistance.
+OCR accuracy, or prompt-injection resistance. The new provisioning script has not
+been applied to a live subscription; the historical checks below concern the
+application, not scripted resource creation.
 
 ## Recorded live Azure smoke checks
 

@@ -2,6 +2,9 @@
 
 Start with the [README](../README.md) for the customer setup and demo sequence.
 This reference covers implementation details and deeper troubleshooting.
+For a new-resource setup, the opt-in
+[provisioning script and guide](provisioning.md) create resources and populate
+`.env`; manual setup below remains supported.
 
 ## Azure setup details
 

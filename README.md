@@ -71,8 +71,9 @@ selected pages requested for analysis. Use synthetic or approved documents only.
 
 ### 1. Prepare the Azure resources and permissions
 
-Have an administrator configure these resources manually. The running application
-does not provision or delete Azure resources.
+The complete resource list is below. Use existing resources configured manually,
+or use the **optional creation script** after installing the sample (step 3).
+The running application never provisions or deletes Azure resources.
 
 | Resource | Required configuration |
 |---|---|
@@ -81,6 +82,12 @@ does not provision or delete Azure resources.
 | Embedding deployment | Deploy `text-embedding-3-small` with **1536 dimensions**. Record its deployment name and resource endpoint: `https://<resource>.openai.azure.com`. |
 | Azure AI Search | A vector-capable service with RBAC enabled. Create a **dedicated index** using [`search-index.json`](search-index.json), replacing the name placeholder. Basic or higher is a straightforward choice; verify regional support. No indexer, skillset, or semantic ranker is needed. |
 | Azure AI Document Intelligence | An S0 OCR-capable resource supporting `prebuilt-read`. Copy its custom-subdomain endpoint: `https://<resource>.cognitiveservices.azure.com/`. The free tier's two-page analysis limit is unsuitable for this sample. |
+
+For a new setup, you also need a **resource group**, one **Search index**, and one
+**Foundry prompt-agent version**. The script creates all of these, both model
+deployments, and role assignments for the signed-in user and Foundry project
+identity. No Storage account, App Service, Cosmos DB, Fabric, or SharePoint
+resources are needed.
 
 Create the Search index through the portal's index JSON editor or the Search
 data-plane REST API. [Additional setup details](docs/technical-guide.md#azure-setup-details)
@@ -123,7 +130,53 @@ Then install the pinned dependencies:
 python -m pip install -r requirements.txt
 ```
 
-### 3. Configure the resource settings
+### 3. Choose new or existing Azure resources
+
+#### Option A: Create a dedicated demo setup
+
+Use [`scripts/provision_azure.py`](scripts/provision_azure.py) if you do not already
+have resources. It runs cross-platform through Python and Azure CLI; the resource
+definitions are in [`infra/azure-resources.json`](infra/azure-resources.json).
+You need **Owner**, or **Contributor plus role-assignment permissions**, at the
+appropriate scope, including permission to create the resource group and register
+providers in the subscription.
+
+Sign in first:
+
+```bash
+az login
+```
+
+Preview the intended setup (no Azure calls or file writes):
+
+```bash
+python -m scripts.provision_azure --subscription "<subscription-id>" --resource-group "rg-propel-pdf-demo" --location "<supported-region>" --name-prefix "propelpdf"
+```
+
+After checking the region, quota, and costs, explicitly authorize creation:
+
+```bash
+python -m scripts.provision_azure --subscription "<subscription-id>" --resource-group "rg-propel-pdf-demo" --location "<supported-region>" --name-prefix "propelpdf" --apply
+```
+
+The script selects the subscription, registers providers, creates a dedicated
+Foundry resource/project, `gpt-4.1` answer and `text-embedding-3-small` deployments,
+Basic Search, S0 OCR, roles, index, and agent. It creates `.env` if absent and
+populates **all eight settings**, without credentials. It refuses to overwrite
+settings pointing at different existing resources.
+
+**Defaults are not universally available:** the region must support `gpt-4.1`
+version `2025-04-14` (`GlobalStandard`) and `text-embedding-3-small` version `1`
+(`Standard`) with sufficient quota. Model versions, SKUs, and capacities can be
+overridden; see the [provisioning guide](docs/provisioning.md).
+The script uses public endpoints with local-key authentication disabled;
+it is not a production/private-network deployment.
+
+On success, **skip steps 4 and 5 and go to step 6**. If setup fails, created
+resources remain and may incur charges; resolve the reported issue and rerun
+with the same arguments. The script never deletes resources.
+
+#### Option B: Use resources you already have
 
 Copy `.env.example` to `.env`:
 
@@ -137,6 +190,7 @@ cp .env.example .env
 Copy-Item .env.example .env
 ```
 
+Do not copy over an existing `.env`; edit it instead.
 Fill in the six resource/deployment settings below. Leave the two agent settings
 as placeholders until step 5.
 
@@ -257,6 +311,8 @@ successful upload. Do not delete the ledger to resolve an error.
 
 See the [technical guide](docs/technical-guide.md) for complete troubleshooting,
 ingestion/recovery details, SDK notes, and VS Code debugging.
+See the [provisioning guide](docs/provisioning.md) for optional resource creation
+and `.env` generation.
 See [testing and verification](docs/testing.md) for local test commands and
-the recorded live Azure smoke checks. The current local suite has **65 passing
+the recorded live Azure smoke checks. The current local suite has **88 passing
 tests**; that is distinct from live service validation.
