@@ -1,34 +1,36 @@
-flowchart LR
-    subgraph Local["Local machine - single user, one Uvicorn worker"]
-        Browser["Minimal browser UI"]
-        API["FastAPI - loopback and same-origin only"]
-        PDF["pypdf - text per page"]
-        Chunker["1200-character chunks / 150-character overlap within pages"]
-        Ledger[".runtime/state.json - active set and document UUIDs / known chunk keys"]
-        Validator["Validate chunk IDs and verbatim quotes; render document/page citations"]
-        Identity["DefaultAzureCredential - Entra identity"]
+flowchart TB
+    User["Demo user<br/>Upload PDFs and ask questions"]
+    App["Local demo application<br/>Browser + Python backend<br/>Prepares documents and coordinates Azure calls"]
+
+    subgraph Azure["Azure services"]
+        direction LR
+        OCR["Azure AI Document Intelligence<br/>Read OCR<br/>Extract text from scanned / mixed pages"]
+        Search["Azure AI Search<br/>Dedicated document index<br/>Store chunks and retrieve relevant passages"]
+
+        subgraph Foundry["Microsoft Foundry resource and project"]
+            direction TB
+            Embeddings["Embedding model deployment<br/>text-embedding-3-small"]
+            Agent["Knowledge Librarian prompt agent<br/>Answer model deployment<br/>Select grounded evidence or abstain"]
+        end
     end
-    subgraph Azure["Azure-hosted services - manually configured"]
-        Embeddings["Foundry model deployment - text-embedding-3-small / 1536 dimensions"]
-        Search["Azure AI Search - dedicated hybrid/vector index"]
-        Agent["One Foundry prompt agent - select evidence or abstain; no tools"]
-        OCR["Document Intelligence Read - OCR selected image/textless pages"]
+
+    subgraph Auth["Azure access"]
+        Entra["Microsoft Entra ID<br/>Application identity via DefaultAzureCredential<br/>Azure RBAC authorizes service access"]
     end
-    Browser -->|"Upload 1-2 PDFs together / ask question + current set UUID"| API
-    API -->|"Upload"| PDF --> Chunker
-    PDF -->|"Image-bearing / textless pages"| OCR
-    OCR -->|"Recognized text with original page numbers"| Chunker
-    API -->|"Invalidate old document; record keys before writes"| Ledger
-    Chunker -->|"Embed batches"| Embeddings
-    Embeddings -->|"Vectors via backend"| API
-    API -->|"Delete tracked old records; upload chunks + page metadata"| Search
-    API -->|"Embed question"| Embeddings
-    API -->|"Hybrid retrieval, document_id prefilter, top 5 per PDF"| Search
-    Search -->|"Current document set passages only"| API
-    API -->|"Question + untrusted passages; no history"| Agent
-    Agent -->|"Structured evidence selection"| Validator
-    Validator -->|"Extractive answer + citations, or unsupported"| Browser
-    Identity -.-> Embeddings
-    Identity -.-> Search
-    Identity -.-> Agent
-    Identity -.-> OCR
+
+    User <-->|"PDFs / questions and cited answers"| App
+    App <-->|"1. Read image-bearing or textless pages when needed"| OCR
+    App <-->|"2. Embed document chunks and questions"| Embeddings
+    App <-->|"3. Index content / retrieve within current PDF set"| Search
+    App <-->|"4. Send question + retrieved passages / receive evidence"| Agent
+    Entra -.->|"Access tokens"| App
+
+    classDef local fill:#F1F5F9,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+    classDef azure fill:#E8F4FD,stroke:#0078D4,color:#003B6B,stroke-width:1.5px
+    classDef identity fill:#F3EEFF,stroke:#7653B5,color:#38215C,stroke-width:1.5px
+    class User,App local
+    class OCR,Search,Embeddings,Agent azure
+    class Entra identity
+    style Azure fill:#F8FBFF,stroke:#0078D4,stroke-width:2px
+    style Foundry fill:#EDF6FF,stroke:#58A6E7
+    style Auth fill:#FAF8FF,stroke:#B7A0D9

@@ -211,8 +211,54 @@ removes known records, not the Azure Search resource.
 
 ## Architecture and foundational concepts
 
-The editable Mermaid source is **`architecture.mmd`**. Its local and Azure
-subgraphs distinguish what runs on the workstation from hosted services.
+The diagram focuses on the Azure resources and their connections to the local
+demo. The editable Mermaid source is **[`architecture.mmd`](architecture.mmd)**.
+
+```mermaid
+flowchart TB
+    User["Demo user<br/>Upload PDFs and ask questions"]
+    App["Local demo application<br/>Browser + Python backend<br/>Prepares documents and coordinates Azure calls"]
+
+    subgraph Azure["Azure services"]
+        direction LR
+        OCR["Azure AI Document Intelligence<br/>Read OCR<br/>Extract text from scanned / mixed pages"]
+        Search["Azure AI Search<br/>Dedicated document index<br/>Store chunks and retrieve relevant passages"]
+
+        subgraph Foundry["Microsoft Foundry resource and project"]
+            direction TB
+            Embeddings["Embedding model deployment<br/>text-embedding-3-small"]
+            Agent["Knowledge Librarian prompt agent<br/>Answer model deployment<br/>Select grounded evidence or abstain"]
+        end
+    end
+
+    subgraph Auth["Azure access"]
+        Entra["Microsoft Entra ID<br/>Application identity via DefaultAzureCredential<br/>Azure RBAC authorizes service access"]
+    end
+
+    User <-->|"PDFs / questions and cited answers"| App
+    App <-->|"1. Read image-bearing or textless pages when needed"| OCR
+    App <-->|"2. Embed document chunks and questions"| Embeddings
+    App <-->|"3. Index content / retrieve within current PDF set"| Search
+    App <-->|"4. Send question + retrieved passages / receive evidence"| Agent
+    Entra -.->|"Access tokens"| App
+
+    classDef local fill:#F1F5F9,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+    classDef azure fill:#E8F4FD,stroke:#0078D4,color:#003B6B,stroke-width:1.5px
+    classDef identity fill:#F3EEFF,stroke:#7653B5,color:#38215C,stroke-width:1.5px
+    class User,App local
+    class OCR,Search,Embeddings,Agent azure
+    class Entra identity
+    style Azure fill:#F8FBFF,stroke:#0078D4,stroke-width:2px
+    style Foundry fill:#EDF6FF,stroke:#58A6E7
+    style Auth fill:#FAF8FF,stroke:#B7A0D9
+```
+
+The backend orchestrates every service call: the agent does **not** directly
+query Search or call OCR. Foundry contains the prompt agent and its answer-model
+deployment, plus a separate embedding deployment. Entra authentication applies
+to the backend's Azure calls, not to browser sign-in. The numbered connections
+summarize ingestion and Q&A; OCR runs only when needed. The application runs
+locally, not in an Azure-hosted web service.
 
 | Concept | In this sample |
 |---|---|
